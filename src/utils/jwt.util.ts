@@ -21,11 +21,15 @@ export const sendTokenResponse = (
   // Create token
   const token = generateToken(user._id);
 
+  // Get environment
+  const isProduction = process.env.NODE_ENV === 'production';
+  
   // Cookie options
   const options = {
     expires: new Date(Date.now() + COOKIE_EXPIRE * 24 * 60 * 60 * 1000),
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
+    secure: isProduction,
+    sameSite: isProduction ? 'none' as const : 'lax' as const,
   };
 
   // Remove password from response
