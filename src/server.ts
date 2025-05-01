@@ -5,6 +5,7 @@ import cookieParser from 'cookie-parser';
 import connectDB from './config/db';
 import courseRoutes from './routes/course.route';
 import authRoutes from './routes/auth.route';
+import adminRoutes from './routes/admin.route';
 
 dotenv.config();
 
@@ -14,7 +15,8 @@ const PORT = process.env.PORT || 5000;
 // Define allowed origins
 const allowedOrigins = [
   'http://localhost:3000',
-  'https://an-nahda-academy.vercel.app'
+  'https://an-nahda-academy.vercel.app',
+  'https://www.annahda.net'
 ];
 
 // CORS configuration with multiple origins support
@@ -38,6 +40,7 @@ app.use(cookieParser());
 // Routes
 app.use('/api', courseRoutes);
 app.use('/api/auth', authRoutes);
+app.use('/api/admin', adminRoutes);
 
 // Connect to MongoDB
 connectDB();
