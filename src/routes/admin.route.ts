@@ -8,7 +8,10 @@ import {
   getDashboardStats,
   getActivityLogs,
   getSettings,
-  updateSetting
+  updateSetting,
+  getAllPayments,
+  getPayment,
+  updatePaymentStatus
 } from '../controllers/admin.controller';
 import { protect, authorize } from '../middleware/auth.middleware';
 
@@ -27,6 +30,14 @@ router.route('/users/:id')
   .get(getUser)
   .put(updateUser)
   .delete(deleteUser);
+
+// Payment management routes
+router.route('/payments')
+  .get(getAllPayments);
+
+router.route('/payments/:id')
+  .get(getPayment)
+  .patch(updatePaymentStatus);
 
 // Dashboard statistics
 router.get('/dashboard', getDashboardStats);

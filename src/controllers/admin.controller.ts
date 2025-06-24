@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import User from '../models/user.model';
 import Course from '../models/course.model';
+import Payment from '../models/payment.model';
 import { AdminActivity, AdminSettings } from '../models/admin.model';
 import mongoose, { Document } from 'mongoose';
 
@@ -338,6 +339,225 @@ export const updateSetting = async (req: Request, res: Response): Promise<void> 
     });
   } catch (error: any) {
     console.error('Update setting error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// ================ PAYMENT MANAGEMENT ================
+
+// Get all payments with filtering and pagination
+export const getAllPayments = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 10;
+    const status = req.query.status as string;
+    const paymentMethod = req.query.paymentMethod as string;
+    const search = req.query.search as string;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+
+    // Build filter object
+    const filter: any = {};
+    
+    if (status && status !== 'all') {
+      filter.status = status;
+    }
+    
+    if (paymentMethod && paymentMethod !== 'all') {
+      filter.paymentMethod = paymentMethod;
+    }
+    
+    if (search) {
+      filter.$or = [
+        { customerName: { $regex: search, $options: 'i' } },
+        { customerEmail: { $regex: search, $options: 'i' } },
+        { orderId: { $regex: search, $options: 'i' } },
+        { tranId: { $regex: search, $options: 'i' } }
+      ];
+    }
+    
+    if (startDate || endDate) {
+      filter.createdAt = {};
+      if (startDate) {
+        filter.createdAt.$gte = new Date(startDate);
+      }
+      if (endDate) {
+        filter.createdAt.$lte = new Date(endDate);
+      }
+    }
+
+    // Calculate pagination
+    const skip = (page - 1) * limit;
+    
+    // Get payments with pagination
+    const payments = await Payment.find(filter)
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit);
+    
+    // Get total count
+    const total = await Payment.countDocuments(filter);
+    
+    // Calculate statistics
+    const stats = await Payment.aggregate([
+      {
+        $group: {
+          _id: null,
+          total: { $sum: 1 },
+          completed: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, 1, 0] }
+          },
+          pending: {
+            $sum: { $cond: [{ $eq: ['$status', 'pending'] }, 1, 0] }
+          },
+          failed: {
+            $sum: { $cond: [{ $eq: ['$status', 'failed'] }, 1, 0] }
+          },
+          cancelled: {
+            $sum: { $cond: [{ $eq: ['$status', 'cancelled'] }, 1, 0] }
+          },
+          totalAmount: {
+            $sum: { $cond: [{ $eq: ['$status', 'completed'] }, '$amount', 0] }
+          }
+        }
+      }
+    ]);
+    
+    const statsData = stats[0] || {
+      total: 0,
+      completed: 0,
+      pending: 0,
+      failed: 0,
+      cancelled: 0,
+      totalAmount: 0
+    };
+    
+    statsData.averageAmount = statsData.completed > 0 
+      ? statsData.totalAmount / statsData.completed 
+      : 0;
+
+    // Log admin activity
+    await logAdminActivity(req, 'view', 'Retrieved all payments', 'payment');
+    
+    res.status(200).json({
+      success: true,
+      data: {
+        payments,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit),
+          hasNext: page < Math.ceil(total / limit),
+          hasPrev: page > 1
+        },
+        stats: statsData
+      }
+    });
+  } catch (error: any) {
+    console.error('Get all payments error:', error);
+    res.status(500).json({
+      success: false,
+      message: error.message || 'Server error',
+      stack: error.stack,
+      error
+    });
+  }
+};
+
+// Get single payment
+export const getPayment = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const payment = await Payment.findById(req.params.id);
+    
+    if (!payment) {
+      res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+      return;
+    }
+    
+    // Log admin activity
+    await logAdminActivity(
+      req, 
+      'view', 
+      `Retrieved payment ${payment.orderId}`, 
+      'payment', 
+      payment._id
+    );
+    
+    res.status(200).json({
+      success: true,
+      data: payment
+    });
+  } catch (error: any) {
+    console.error('Get payment error:', error.message);
+    res.status(500).json({
+      success: false,
+      message: 'Server error'
+    });
+  }
+};
+
+// Update payment status
+export const updatePaymentStatus = async (req: Request, res: Response): Promise<void> => {
+  try {
+    const { status } = req.body;
+    
+    if (!status) {
+      res.status(400).json({
+        success: false,
+        message: 'Status is required'
+      });
+      return;
+    }
+    
+    const validStatuses = ['pending', 'completed', 'failed', 'cancelled'];
+    if (!validStatuses.includes(status)) {
+      res.status(400).json({
+        success: false,
+        message: 'Invalid status'
+      });
+      return;
+    }
+    
+    const payment = await Payment.findByIdAndUpdate(
+      req.params.id,
+      {
+        status,
+        ...(status === 'completed' && { paymentDate: new Date() }),
+        updatedAt: new Date()
+      },
+      { new: true }
+    );
+    
+    if (!payment) {
+      res.status(404).json({
+        success: false,
+        message: 'Payment not found'
+      });
+      return;
+    }
+    
+    // Log admin activity
+    await logAdminActivity(
+      req, 
+      'update', 
+      `Updated payment ${payment.orderId} status to ${status}`, 
+      'payment', 
+      payment._id
+    );
+    
+    res.status(200).json({
+      success: true,
+      data: payment
+    });
+  } catch (error: any) {
+    console.error('Update payment status error:', error.message);
     res.status(500).json({
       success: false,
       message: 'Server error'
